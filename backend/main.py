@@ -47,14 +47,14 @@ class ModelManager:
     def load_model(self):
         """Load the Dia model and processor with appropriate configuration using Hugging Face Transformers."""
         try:
-            dtype = self.dtype_map.get(self.device, torch.float16)
-            logger.info(f"Loading model and processor with {dtype} on {self.device}")
-            self.processor = AutoProcessor.from_pretrained(self.model_id)
-            self.model = DiaForConditionalGeneration.from_pretrained(
-                self.model_id,
-                torch_dtype=dtype,
-                device_map=self.device
-            )
+            torch_device = "cuda"
+            model_checkpoint = "nari-labs/Dia-1.6B-0626"
+            
+            logger.info(f"Loading model and processor")
+            
+            self.processor = AutoProcessor.from_pretrained(model_checkpoint)
+            self.model = DiaForConditionalGeneration.from_pretrained(model_checkpoint).to(torch_device)
+            
             logger.info("Model and processor loaded successfully")
         except Exception as e:
             logger.error(f"Error loading model or processor: {e}")
@@ -146,13 +146,8 @@ async def run_inference(request: GenerateRequest):
         processor = model_manager.get_processor()
 
         start_time = time.time()
-
-        processor_inputs = processor(
-            text=[request.text_input],
-            padding=True,
-            return_tensors="pt"
-        )
-        processor_inputs = {k: v.to(model.device) for k, v in processor_inputs.items()}
+        
+        processor_inputs = processor(text=request.text_input, padding=True, return_tensors="pt").to("cuda")
 
         if prompt_path_for_generate is not None:
             processor_inputs["audio_prompt"] = prompt_path_for_generate
@@ -160,12 +155,7 @@ async def run_inference(request: GenerateRequest):
         with torch.inference_mode():
             logger.info(f"Starting generation with audio prompt: {prompt_path_for_generate}")
             outputs = model.generate(
-                **processor_inputs,
-                max_new_tokens=request.max_new_tokens,
-                guidance_scale=request.cfg_scale,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                top_k=request.cfg_filter_top_k
+                **processor_inputs, max_new_tokens=3072, guidance_scale=3.0, temperature=1.8, top_p=0.90, top_k=45
             )
             logger.info(f"Generation completed. Output shape: {outputs.shape if hasattr(outputs, 'shape') else type(outputs)}")
 

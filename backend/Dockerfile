@@ -1,36 +1,47 @@
+# ---------- Base ----------
 FROM python:3.11-slim
 
-# Copy uv binary from the official distroless image
+# Copy uv binaries
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Set working directory
+# Workdir
 WORKDIR /app
 
-# Install system dependencies required for soundfile and torch
-RUN apt-get update && apt-get install -y \
+# System deps:
+# - libsndfile1: required by soundfile
+# - libgomp1: OpenMP runtime required by PyTorch CPU wheels
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libsndfile1 \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+    libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files first for better caching
+# (Optional) Make Hugging Face cache a volume-friendly path
+ENV HF_HOME=/root/.cache/huggingface
+
+# Copy dependency files first for cache-friendly builds
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
+# Install project venv & deps (without project files yet)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project
 
-# Copy the project into the image
+# Copy the rest of the project
 COPY . .
 
-# Sync the project
+# Install project itself into the venv
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
-# Create directory for audio files
+# Create output dir
 RUN mkdir -p audio_files
 
-# Expose the port the app runs on
+# FastAPI port
 EXPOSE 8000
 
-# Command to run the application
+# (Optional) Nice defaults for PyTorch CPU perf & log noise
+ENV OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    PYTHONUNBUFFERED=1
+
+# Run the API
 CMD ["/app/.venv/bin/fastapi", "run", "main.py", "--port", "8000", "--host", "0.0.0.0"]
